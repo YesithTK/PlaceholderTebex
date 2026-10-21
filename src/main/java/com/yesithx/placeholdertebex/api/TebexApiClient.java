@@ -68,67 +68,84 @@ public class TebexApiClient {
         return sb.toString();
     }
 
+    /**
+     * Loads the newest {@code limit} completed payments ({@code limit <= 0} loads the whole history).
+     * {@code /payments?limit=} rejects anything above 100, so this walks the paginated endpoint
+     * until the limit or the last page is reached.
+     */
     public List<Donor> fetchPayments(int limit) {
         List<Donor> donors = new ArrayList<>();
         try {
-            String json = fetch("/payments?limit=" + limit);
+            int seen = 0;
+            int page = 1;
+            int lastPage = 1;
+            do {
+                String json = fetch("/payments?paged=1&page=" + page);
 
-            JsonArray data = null;
-            try {
-                data = JsonParser.parseString(json).getAsJsonArray();
-            } catch (Exception e1) {
+                JsonArray data = null;
                 try {
-                    JsonObject root = JsonParser.parseString(json).getAsJsonObject();
-                    if (root.has("data")) {
-                        data = root.getAsJsonArray("data");
-                    } else if (root.has("payments")) {
-                        data = root.getAsJsonArray("payments");
+                    data = JsonParser.parseString(json).getAsJsonArray();
+                } catch (Exception e1) {
+                    try {
+                        JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+                        if (root.has("last_page")) lastPage = root.get("last_page").getAsInt();
+                        if (root.has("data")) {
+                            data = root.getAsJsonArray("data");
+                        } else if (root.has("payments")) {
+                            data = root.getAsJsonArray("payments");
+                        }
+                    } catch (Exception e2) {
+                        plugin.getLogger().warning("[PlaceholderTebex] Could not parse payments response: " + e2.getMessage());
                     }
-                } catch (Exception e2) {
-                    plugin.getLogger().warning("[PlaceholderTebex] Could not parse payments response: " + e2.getMessage());
-                }
-            }
-
-            if (data == null) {
-                plugin.getLogger().warning("[PlaceholderTebex] No payment data found in response.");
-                return donors;
-            }
-
-            for (JsonElement el : data) {
-                JsonObject payment = el.getAsJsonObject();
-
-                String username = getStringSafe(payment, "player", "name");
-                if (username.equals(plugin.getConfigManager().getNoDataPlaceholder())) {
-                    username = getStringSafe(payment, "username");
-                }
-                if (username.equals(plugin.getConfigManager().getNoDataPlaceholder())) {
-                    username = getStringSafe(payment, "name");
                 }
 
-                double amount = 0.0;
-                if (payment.has("amount")) amount = payment.get("amount").getAsDouble();
-                else if (payment.has("price")) amount = payment.get("price").getAsDouble();
-
-                String currency = getNestedStringSafe(payment, "currency", "iso_4217");
-                if (currency.equals(plugin.getConfigManager().getNoDataPlaceholder())) {
-                    currency = getStringSafe(payment, "currency");
+                if (data == null) {
+                    plugin.getLogger().warning("[PlaceholderTebex] No payment data found in response.");
+                    return donors;
                 }
 
-                String dateStr = getStringSafe(payment, "date");
-                if (dateStr.equals(plugin.getConfigManager().getNoDataPlaceholder())) {
-                    dateStr = getStringSafe(payment, "created_at");
-                }
-                LocalDateTime date = parseDateSafe(dateStr);
+                for (JsonElement el : data) {
+                    JsonObject payment = el.getAsJsonObject();
 
-                String packageName = getFirstPackageName(payment);
-                String transactionId = getStringSafe(payment, "transaction_id");
-                if (transactionId.equals(plugin.getConfigManager().getNoDataPlaceholder())) {
-                    transactionId = getStringSafe(payment, "txn_id");
-                }
-                String email = getStringSafe(payment, "email");
+                    // Unlike /payments?limit=, the paginated history also lists declined and refunded payments.
+                    if (!getStringSafe(payment, "status").equalsIgnoreCase("Complete")) continue;
+                    if (limit > 0 && seen >= limit) return donors;
+                    seen++;
 
-                donors.add(new Donor(username, amount, currency, date, packageName, transactionId, email));
-            }
+                    String username = getStringSafe(payment, "player", "name");
+                    if (username.equals(plugin.getConfigManager().getNoDataPlaceholder())) {
+                        username = getStringSafe(payment, "username");
+                    }
+                    if (username.equals(plugin.getConfigManager().getNoDataPlaceholder())) {
+                        username = getStringSafe(payment, "name");
+                    }
+
+                    double amount = 0.0;
+                    if (payment.has("amount")) amount = payment.get("amount").getAsDouble();
+                    else if (payment.has("price")) amount = payment.get("price").getAsDouble();
+
+                    String currency = getNestedStringSafe(payment, "currency", "iso_4217");
+                    if (currency.equals(plugin.getConfigManager().getNoDataPlaceholder())) {
+                        currency = getStringSafe(payment, "currency");
+                    }
+
+                    String dateStr = getStringSafe(payment, "date");
+                    if (dateStr.equals(plugin.getConfigManager().getNoDataPlaceholder())) {
+                        dateStr = getStringSafe(payment, "created_at");
+                    }
+                    LocalDateTime date = parseDateSafe(dateStr);
+
+                    String packageName = getFirstPackageName(payment);
+                    String transactionId = getStringSafe(payment, "transaction_id");
+                    if (transactionId.equals(plugin.getConfigManager().getNoDataPlaceholder())) {
+                        transactionId = getStringSafe(payment, "txn_id");
+                    }
+                    String email = getStringSafe(payment, "email");
+
+                    donors.add(new Donor(username, amount, currency, date, packageName, transactionId, email));
+                }
+                page++;
+            } while (page <= lastPage);
 
         } catch (Exception e) {
             plugin.getLogger().severe("[PlaceholderTebex] Failed to fetch payments: " + e.getMessage());

@@ -4,6 +4,7 @@ tebex:
 
 cache:
   refresh-interval: 10
+  # Number of newest payments to load; 0 loads the whole history. Only completed payments are counted.
   payment-history-limit: 100
 
 goal:

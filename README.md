@@ -52,7 +52,7 @@ tebex:
 
 cache:
   refresh-interval: 10         # Minutes between Tebex API fetches
-  payment-history-limit: 100   # Number of past payments to load
+  payment-history-limit: 100   # Number of past payments to load (0 = whole history)
 
 goal:
   enabled: true
